@@ -1,0 +1,179 @@
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--MINERAÇÃO DE TEXTO COM FOCO EM ANÁLISE DE SENTIMENTO -------------------------
+--DISCIPLINA SISTEMAS MULTIMIDIA------------------------------------------------
+--DOSCENTE DOUTOR MARCOS TULIO AMARIS GONZALEZ----------------------------------
+--------------------------------------------------------------------------------
+------(DISCENTES)---------------------------------------------------------------
+--ATANAIL GONCALVES DE ANDRADE---(201333840036)---------------------------------
+--EDSON MARTINS CAVALCANTE-------(201533840014)---------------------------------
+--GUSTAVO ERIKO PORTILHO VIANA---(201533840017)---------------------------------
+--NATÃ FERREIRA LOBATO-----------(201733840013)---------------------------------
+--ATANAIL GONCALVES DE ANDRADE---(201333840036)---------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+Este trabalho tem como objetivo a análise de sentimentos, através de dados 
+coletados da rede social Twitter, com foco em analises de sentimento.
+
+## Etapa 1 - Preparação - Carregamento de pacotes e função
+```{r pacotes}
+#Ferramentas para a API dp Twitter
+  library(rtweet)
+  library(twitteR)
+  library(httr)
+  library(knitr)
+#Plotagem e custumização  
+  library(ggplot2)
+  library(RColorBrewer)
+  library(wordcloud)
+  library(cluster)   
+  library(fpc)
+  library(graphics)
+  library(purrr)
+  library(stringr) 
+  library(syuzhet)
+#Analise de sentimentos e organização de textos
+  library(tm)
+  library(Rstem)
+  library(sentiment)
+  library(RSentiment)
+
+ # funções de limpeza
+   source('utils.R')
+```
+## Autenticação e conexão com a API do Twitter
+```{r pacotes}
+api_key <-             "xxxxxx"
+api_secret <-          "xxxxxx"
+access_token <-        "xxxxxx"
+access_token_secret <- "xxxxxx"
+setup_twitter_oauth(api_key,api_secret,access_token,access_token_secret)
+```
+## Etapa 2 - Coleta dos Dados - carregamento dos Tweets
+```{r tweets}
+
+ # Limite maximo de 18000 Tweets, por pesquisa
+
+tweetdata <- search_tweets(
+  "Exército", n = 18000, include_rts = FALSE,lang = "pt")
+
+```
+## Amostra de frequencia que os Tweets Foram postados
+```{r}
+tweetdata %>%
+  ts_plot("1 hours") +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(plot.title = ggplot2::element_text(face = "bold")) +
+  ggplot2::labs(
+    x = NULL, y = NULL,
+    title = "Frequencia dos posts",
+    subtitle = "Tweets a cada 1 hora",
+    caption = "Dados coletados via API rtweet")
+```
+## Etapa 3 - Tratamento dos dados
+```{r tratamento}
+  # Obtendo o texto
+  tweetlist <- tweetdata$text
+
+  # Limpando, organizando e transformando os dados
+  tweetlist <- limpaTweets(tweetlist)
+  
+  # Removendo os NAs
+  tweetlist = tweetlist[!is.na(tweetlist)]
+  names(tweetlist) = NULL
+```
+##  Resultado da associação entre palavras
+```{r wordcloud}
+# convertendo os tweets coletados em um objeto do tipo Corpus com o pacote tm, armazenando dados e metadados.
+  tweetCorpus <- Corpus(VectorSource(tweetlist))
+  
+  # Limpa Corpus
+  tweetCorpus <- limpaCorpus(tweetCorpus)
+```
+## Gerando uma nuvem com as palavras mais frequentes
+```{r wordcloud}
+# gerando uma nuvem de palavras
+  pal2 <- brewer.pal(20, "Dark2")
+  
+  wordcloud(tweetCorpus, 
+            min.freq = 20,
+            scale = c(5,1),
+            random.color = T,
+            max.words = 100,
+            random.order = F,
+            colors = pal2)
+```
+## Convertendo o objeto texto para o formato de matriz
+```{r wordcloud}
+tweettdm <- TermDocumentMatrix(tweetCorpus)
+  tweettdm
+  
+  # Encontrando as palavras que aparecem com mais frequencia
+  findFreqTerms(tweettdm, lowfreq = 11)
+  
+  # Buscando associações
+  findAssocs(tweettdm, 'inteligencia', 0.6)
+  
+  # Removendo termos esparsos (não utilizados frequentemente)
+  tweet2tdm <- removeSparseTerms(tweettdm, sparse = 0.9)
+  
+  # Criando escala nos dados 
+  tweet2tdmscale <- scale(tweet2tdm)
+  
+  # Distance Matrix
+  tweetdist <- dist(tweet2tdmscale, method = "euclidean")
+  
+  # Preparando o dendograma
+  tweetfit <- hclust(tweetdist)
+```
+## Plotando Demograma com as palavras que se agrupam
+```{r wordcloud}
+# Criando o dendograma
+  plot(tweetfit)
+  
+  # Verificando os grupos
+  cutree(tweetfit, k = 5)
+  
+  # Visualizando os grupos de palavras no dendograma
+  rect.hclust(tweetfit, k = 5, border = "red")
+```
+## Classificador Naive Bayes
+a funções classify_emotion() e classify_polarity() do pacote sentiment, utilizamo algotimo Naive Bayes para a análise de sentimento. Neste caso, o próprio algoritmo faz a classificação das palavras e não é preciso criar listas de palavras positivas e negativas.
+```{r classificador}
+
+  # Classificando emoção
+  class_emo = classify_emotion(tweetlist, algorithm = "bayes", prior = 1.0)
+  emotion = class_emo[,7]
+  
+  # Substituindo NA's por "Neutro"
+  emotion[is.na(emotion)] = "Neutro"
+  
+  # Classificando polaridade
+  class_pol = classify_polarity(tweetlist, algorithm = "bayes")
+  polarity = class_pol[,4]
+  
+  # Gerando um dataframe com o resultado
+  sent_df = data.frame(text = tweetlist, emotion = emotion,
+                       polarity = polarity, stringsAsFactors = FALSE)
+  
+  # Ordenando o dataframe
+  sent_df = within(sent_df,
+                   emotion <- factor(emotion, levels = names(sort(table(emotion), decreasing=TRUE))))
+```
+## Etapa 4 - Resultados - Sentimentos existentes nesta amostra
+```{r visualizacao}
+# Emoções encontradas
+  ggplot(sent_df, aes(x = emotion)) +
+         geom_bar(aes(y = ..count.., fill = emotion)) +
+         scale_fill_brewer(palette = "Dark2") +
+         labs(x = "Categorias", y = "Numero de Tweets")
+```
+```{r visualizacao}
+# Polaridade
+  ggplot(sent_df, aes(x = polarity)) +
+         geom_bar(aes(y = ..count.., fill = polarity)) +
+         scale_fill_brewer(palette = "RdGy") +
+         labs(x = "Categorias de Sentimento", y = "Numero de Tweets")
+```
+
